@@ -1,0 +1,134 @@
+trigger:
+- azure-pipelines
+
+variables:
+  buildConfiguration: 'Release'
+  projectPath: 'pipelines-dotnet-core.csproj'
+  artifactName: 'drop'
+
+stages:
+#
+# STAGE 1: Build the application
+#
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    pool:
+      name: 'pcso-dev'
+    steps:
+    - checkout: self
+
+    - task: UseDotNet@2
+      displayName: 'Use .NET 6.x'
+      inputs:
+        packageType: 'sdk'
+        version: '6.x'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet Packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Project'
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj' 
+        arguments: '--configuration $(buildConfiguration)'
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Project'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: true
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: '$(artifactName)'
+        publishLocation: 'Container'
+
+#
+# STAGE 2: Run unit tests
+#
+- stage: Test
+  displayName: 'Test Stage'
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET 6.x'
+      inputs:
+        packageType: 'sdk'
+        version: '6.x'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore packages for Test'
+      inputs:
+        command: 'restore'
+        projects: '**/*Tests/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run Unit Tests'
+      inputs:
+        command: 'test'
+        projects: '**/*Tests/*.csproj'
+        # Explicitly set the results directory
+        arguments: '--configuration $(buildConfiguration)'
+        publishTestResults: true
+
+#
+# STAGE 3: Deploy the application
+#
+- stage: Deploy
+  displayName: 'Deploy Stage'
+  dependsOn: Test
+  jobs:
+  - deployment: DeployToVM
+    displayName: 'Deploy to EC2 Instance'
+    environment:
+      name: 'dev'
+      resourceType: VirtualMachine
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'specific'
+              artifactName: '$(artifactName)'
+              downloadPath: '$(System.ArtifactsDirectory)'
+              checkDownloadedFiles: true
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $sourceZip = '$(System.ArtifactsDirectory)/$(artifactName)/s.zip'
+                $destination = 'C:\inetpub\MyWebApp'
+                $appPoolName = 'MyWebApp'
+
+                Write-Host "Stopping application pool: $appPoolName"
+                Stop-WebAppPool -Name $appPoolName -ErrorAction SilentlyContinue
+
+                Write-Host "Waiting for 2 seconds..."
+                Start-Sleep -Seconds 2
+
+                Write-Host "Clearing destination folder: $destination"
+                if (Test-Path ($destination + "\*")) {
+                    Remove-Item -Path ($destination + "\*") -Recurse -Force
+                }
+
+                Write-Host "Unzipping application files..."
+                Expand-Archive -Path $sourceZip -DestinationPath $destination -Force
+
+                Write-Host "Starting application pool: $appPoolName"
+                Start-WebAppPool -Name $appPoolName
+
+                Write-Host "Deployment to IIS site is complete."
