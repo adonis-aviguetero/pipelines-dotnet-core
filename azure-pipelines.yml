@@ -60,7 +60,7 @@ stages:
   jobs:
   - job: TestJob
     pool:
-      vmImage: 'ubuntu-latest'
+      name: 'pcso-dev'
     steps:
     - task: UseDotNet@2
       displayName: 'Use .NET 6.x'
