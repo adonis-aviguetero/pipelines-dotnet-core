@@ -93,7 +93,7 @@ stages:
   - deployment: DeployToVM
     displayName: 'Deploy to EC2 Instance'
     environment:
-      name: 'map online'
+      name: 'pipelines-dotnet-core-server-group'
       resourceType: VirtualMachine
     strategy:
       runOnce:
