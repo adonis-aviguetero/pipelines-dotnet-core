@@ -1,5 +1,5 @@
 trigger:
-- azure-pipelines
+- master
 
 variables:
   buildConfiguration: 'Release'
@@ -93,7 +93,7 @@ stages:
   - deployment: DeployToVM
     displayName: 'Deploy to EC2 Instance'
     environment:
-      name: 'dev'
+      name: 'map online'
       resourceType: VirtualMachine
     strategy:
       runOnce:
